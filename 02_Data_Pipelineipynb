@@ -1,0 +1,427 @@
+{
+  "nbformat": 4,
+  "nbformat_minor": 0,
+  "metadata": {
+    "colab": {
+      "provenance": [],
+      "gpuType": "T4",
+      "authorship_tag": "ABX9TyMSboFTbheCl/1U4SdaO6np",
+      "include_colab_link": true
+    },
+    "kernelspec": {
+      "name": "python3",
+      "display_name": "Python 3"
+    },
+    "language_info": {
+      "name": "python"
+    },
+    "accelerator": "GPU"
+  },
+  "cells": [
+    {
+      "cell_type": "markdown",
+      "metadata": {
+        "id": "view-in-github",
+        "colab_type": "text"
+      },
+      "source": [
+        "<a href=\"https://colab.research.google.com/github/gkmfrombs/isro-land-use-classifier/blob/main/02_Data_Pipelineipynb\" target=\"_parent\"><img src=\"https://colab.research.google.com/assets/colab-badge.svg\" alt=\"Open In Colab\"/></a>"
+      ]
+    },
+    {
+      "cell_type": "markdown",
+      "source": [
+        "## **Loading the data**\n",
+        "**Land Cover Classification : Bhuvan Satellite Data**\n",
+        "\n"
+      ],
+      "metadata": {
+        "id": "MJsgHNPwsdmQ"
+      }
+    },
+    {
+      "cell_type": "markdown",
+      "source": [
+        "--------------------------------------------------------------------\n",
+        "--------------------------------------------------------------------"
+      ],
+      "metadata": {
+        "id": "GSzvvD4LtmS8"
+      }
+    },
+    {
+      "cell_type": "markdown",
+      "source": [
+        "# 🛰️ ISRO Bhuvan Land Cover Classification (Varanasi)\n",
+        "\n",
+        "### Dataset Overview\n",
+        "This notebook uses high-resolution 2D satellite imagery of Varanasi, India, sourced from the Indian Space Research Organisation (ISRO). It is pre-processed for pixel-level image segmentation tasks.\n",
+        "\n",
+        "**The 5 Target Classes:**\n",
+        "* Vegetation\n",
+        "* Urban Areas\n",
+        "* Forest\n",
+        "* Water Bodies\n",
+        "* Roads\n",
+        "\n",
+        "**Data Structure:**\n",
+        "* `train_image` & `test_image`: The raw satellite photos fed into the neural network.\n",
+        "* `train_mask` & `test_mask`: The labeled images where every pixel is color-coded to a target class.\n",
+        "* `class_dict_seg.csv`: Maps the exact RGB colors in the masks to their actual class names."
+      ],
+      "metadata": {
+        "id": "JCW0mb17tsWc"
+      }
+    },
+    {
+      "cell_type": "code",
+      "execution_count": 1,
+      "metadata": {
+        "colab": {
+          "base_uri": "https://localhost:8080/"
+        },
+        "id": "dF6CYEulnR0U",
+        "outputId": "7995cc9d-6a61-4ed7-a629-3d4c3c888a50"
+      },
+      "outputs": [
+        {
+          "output_type": "stream",
+          "name": "stdout",
+          "text": [
+            "Warning: Looks like you're using an outdated `kagglehub` version (installed: 0.3.13), please consider upgrading to the latest version (1.0.0).\n",
+            "Downloading from https://www.kaggle.com/api/v1/datasets/download/khushiipatni/satellite-image-and-mask?dataset_version_number=4...\n"
+          ]
+        },
+        {
+          "output_type": "stream",
+          "name": "stderr",
+          "text": [
+            "100%|██████████| 7.39M/7.39M [00:01<00:00, 4.16MB/s]"
+          ]
+        },
+        {
+          "output_type": "stream",
+          "name": "stdout",
+          "text": [
+            "Extracting files...\n"
+          ]
+        },
+        {
+          "output_type": "stream",
+          "name": "stderr",
+          "text": [
+            "\n"
+          ]
+        },
+        {
+          "output_type": "stream",
+          "name": "stdout",
+          "text": [
+            "Path to dataset files: /root/.cache/kagglehub/datasets/khushiipatni/satellite-image-and-mask/versions/4\n"
+          ]
+        }
+      ],
+      "source": [
+        "import kagglehub\n",
+        "\n",
+        "# Download latest version\n",
+        "path = kagglehub.dataset_download(\"khushiipatni/satellite-image-and-mask\")\n",
+        "\n",
+        "print(\"Path to dataset files:\", path)"
+      ]
+    },
+    {
+      "cell_type": "markdown",
+      "metadata": {
+        "id": "5d6dd2f4"
+      },
+      "source": [
+        "The dataset has been successfully downloaded to the following path: `/root/.cache/kagglehub/datasets/khushiipatni/satellite-image-and-mask/versions/4`"
+      ]
+    },
+    {
+      "cell_type": "markdown",
+      "source": [
+        "##**Preprocessing And Pipline**"
+      ],
+      "metadata": {
+        "id": "blUuAin1uU69"
+      }
+    },
+    {
+      "cell_type": "code",
+      "source": [
+        "import os\n",
+        "import cv2\n",
+        "import matplotlib.pyplot as plt\n",
+        "import numpy as np\n",
+        "import pandas as pd"
+      ],
+      "metadata": {
+        "id": "rZIUY4XWr-8L"
+      },
+      "execution_count": 11,
+      "outputs": []
+    },
+    {
+      "cell_type": "code",
+      "source": [
+        "dataset_path = '/root/.cache/kagglehub/datasets/khushiipatni/satellite-image-and-mask/versions/4'\n",
+        "image_dir = os.path.join(dataset_path, 'train_image')\n",
+        "mask_dir = os.path.join(dataset_path, 'train_mask')"
+      ],
+      "metadata": {
+        "id": "q9uvbhOcuE9B"
+      },
+      "execution_count": 12,
+      "outputs": []
+    },
+    {
+      "cell_type": "code",
+      "source": [
+        "# 1. Gather all file paths and sort them alphabetically\n",
+        "train_image_paths = sorted([os.path.join(image_dir, f) for f in os.listdir(image_dir) if f.endswith(('.jpg', '.png'))])\n",
+        "train_mask_paths = sorted([os.path.join(mask_dir, f) for f in os.listdir(mask_dir) if f.endswith(('.jpg', '.png'))])\n",
+        "\n",
+        "print(f\"Total Images Found: {len(train_image_paths)}\")\n",
+        "print(f\"Total Masks Found: {len(train_mask_paths)}\")\n",
+        "\n",
+        "# Safety check: Ensure we have the exact same number of images and masks\n",
+        "assert len(train_image_paths) == len(train_mask_paths), \"Mismatch! The number of images and masks do not match.\"\n",
+        "print(\"Safety check passed! Images and masks are aligned.\")"
+      ],
+      "metadata": {
+        "colab": {
+          "base_uri": "https://localhost:8080/"
+        },
+        "id": "eAaaW0_FEkC3",
+        "outputId": "bda02098-945d-452c-c9f1-32190ec9bd7c"
+      },
+      "execution_count": 13,
+      "outputs": [
+        {
+          "output_type": "stream",
+          "name": "stdout",
+          "text": [
+            "Total Images Found: 60\n",
+            "Total Masks Found: 60\n",
+            "Safety check passed! Images and masks are aligned.\n"
+          ]
+        }
+      ]
+    },
+    {
+      "cell_type": "code",
+      "source": [
+        "# Target size for the Neural Network\n",
+        "IMG_SIZE = 256\n",
+        "\n",
+        "# Exact mapping from your dataset\n",
+        "class_mapping = {\n",
+        "    'urban': (0, [0, 255, 255]),\n",
+        "    'water': (1, [0, 0, 255]),\n",
+        "    'forest': (2, [0, 255, 0]),\n",
+        "    'argiculture': (3, [255, 255, 0]),\n",
+        "    'road': (4, [255, 0, 255])\n",
+        "}\n",
+        "\n",
+        "def preprocess_mask(mask_image):\n",
+        "    # Resize mask without blending colors (INTER_NEAREST)\n",
+        "    resized = cv2.resize(mask_image, (IMG_SIZE, IMG_SIZE), interpolation=cv2.INTER_NEAREST)\n",
+        "\n",
+        "    # Create empty single-channel array\n",
+        "    label_mask = np.zeros((IMG_SIZE, IMG_SIZE), dtype=np.uint8)\n",
+        "\n",
+        "    # Swap RGB colors for Class IDs\n",
+        "    for class_info in class_mapping.values():\n",
+        "        class_id = class_info[0]\n",
+        "        color = class_info[1]\n",
+        "        matches = np.all(resized == color, axis=-1)\n",
+        "        label_mask[matches] = class_id\n",
+        "\n",
+        "    return np.expand_dims(label_mask, axis=-1)\n",
+        "\n",
+        "print(\"Preprocessing rules defined successfully!\")"
+      ],
+      "metadata": {
+        "colab": {
+          "base_uri": "https://localhost:8080/"
+        },
+        "id": "5_Wh3vUQE9_-",
+        "outputId": "b7f63af3-9a78-4fb7-8d94-3ddadf07926f"
+      },
+      "execution_count": 14,
+      "outputs": [
+        {
+          "output_type": "stream",
+          "name": "stdout",
+          "text": [
+            "Preprocessing rules defined successfully!\n"
+          ]
+        }
+      ]
+    },
+    {
+      "cell_type": "code",
+      "source": [
+        "from sklearn.model_selection import train_test_split\n",
+        "\n",
+        "# Split the 60 file paths:\n",
+        "# 50 images for Training (80%), 10 images for Validation (20%)\n",
+        "train_x, val_x, train_y, val_y = train_test_split(\n",
+        "    train_image_paths,\n",
+        "    train_mask_paths,\n",
+        "    test_size=0.2,\n",
+        "    random_state=42 # This number ensures the split is the same every time you run it\n",
+        ")\n",
+        "\n",
+        "print(f\"Training on: {len(train_x)} images\")\n",
+        "print(f\"Validating on: {len(val_x)} images\")"
+      ],
+      "metadata": {
+        "colab": {
+          "base_uri": "https://localhost:8080/"
+        },
+        "id": "02lN5N55Hg8d",
+        "outputId": "98ea85b1-c7c1-48ef-9992-25fab6c38655"
+      },
+      "execution_count": 15,
+      "outputs": [
+        {
+          "output_type": "stream",
+          "name": "stdout",
+          "text": [
+            "Training on: 48 images\n",
+            "Validating on: 12 images\n"
+          ]
+        }
+      ]
+    },
+    {
+      "cell_type": "code",
+      "source": [
+        "import tensorflow as tf\n",
+        "\n",
+        "# 1. The Worker: Processes a single image/mask pair\n",
+        "def process_path(img_path, mask_path):\n",
+        "    # TensorFlow passes file paths as byte strings, so we decode them to standard text\n",
+        "    img_path = img_path.decode('utf-8')\n",
+        "    mask_path = mask_path.decode('utf-8')\n",
+        "\n",
+        "    # Process the Satellite Image\n",
+        "    img = cv2.imread(img_path)\n",
+        "    img = cv2.cvtColor(img, cv2.COLOR_BGR2RGB)\n",
+        "    img = cv2.resize(img, (IMG_SIZE, IMG_SIZE))\n",
+        "    img = img / 255.0  # Normalize: scales pixels from 0-255 down to 0.0-1.0\n",
+        "\n",
+        "    # Process the Mask\n",
+        "    mask = cv2.imread(mask_path)\n",
+        "    mask = cv2.cvtColor(mask, cv2.COLOR_BGR2RGB)\n",
+        "    processed_mask = preprocess_mask(mask)\n",
+        "\n",
+        "    # Return both as float32 decimal numbers (the standard for neural networks)\n",
+        "    return img.astype(np.float32), processed_mask.astype(np.float32)\n",
+        "\n",
+        "# 2. The Translator: Wraps our Python worker so TensorFlow can use it\n",
+        "def tf_parse(img_path, mask_path):\n",
+        "    # tf.numpy_function runs our python code inside the fast TensorFlow graph\n",
+        "    img, mask = tf.numpy_function(process_path, [img_path, mask_path], [tf.float32, tf.float32])\n",
+        "\n",
+        "    # We must explicitly tell TensorFlow the final shapes so it doesn't get confused\n",
+        "    img.set_shape([IMG_SIZE, IMG_SIZE, 3])\n",
+        "    mask.set_shape([IMG_SIZE, IMG_SIZE, 1])\n",
+        "\n",
+        "    return img, mask\n",
+        "\n",
+        "# 3. The Conveyor Belt: Building the actual pipeline\n",
+        "BATCH_SIZE = 8\n",
+        "\n",
+        "# IMPORTANT: We use train_x and train_y here (from our split),\n",
+        "# NOT the original train_image_paths list!\n",
+        "train_dataset = tf.data.Dataset.from_tensor_slices((train_x, train_y))\n",
+        "train_dataset = train_dataset.map(tf_parse, num_parallel_calls=tf.data.AUTOTUNE)\n",
+        "train_dataset = train_dataset.shuffle(buffer_size=50).batch(BATCH_SIZE).prefetch(tf.data.AUTOTUNE)\n",
+        "\n",
+        "# Also create the Validation Pipeline here\n",
+        "val_dataset = tf.data.Dataset.from_tensor_slices((val_x, val_y))\n",
+        "val_dataset = val_dataset.map(tf_parse, num_parallel_calls=tf.data.AUTOTUNE)\n",
+        "val_dataset = val_dataset.batch(BATCH_SIZE).prefetch(tf.data.AUTOTUNE)\n",
+        "\n",
+        "print(\"Data Pipelines (Train & Val) successfully built!\")\n",
+        "for image_batch,mask_batch in train_dataset.take(1):\n",
+        "  print(f\"Batch Image Shape: {image_batch.shape}\")\n",
+        "  print(f\"Batch Mask Shape: {mask_batch.shape}\")"
+      ],
+      "metadata": {
+        "colab": {
+          "base_uri": "https://localhost:8080/"
+        },
+        "id": "JqBoiXM8I8s4",
+        "outputId": "6edc98fa-426c-4217-f853-285c6b447b24"
+      },
+      "execution_count": 18,
+      "outputs": [
+        {
+          "output_type": "stream",
+          "name": "stdout",
+          "text": [
+            "Data Pipelines (Train & Val) successfully built!\n",
+            "Batch Image Shape: (8, 256, 256, 3)\n",
+            "Batch Mask Shape: (8, 256, 256, 1)\n"
+          ]
+        }
+      ]
+    },
+    {
+      "cell_type": "markdown",
+      "source": [
+        "------------------------------------------------------------------"
+      ],
+      "metadata": {
+        "id": "OK7rlZ88LZ9y"
+      }
+    },
+    {
+      "cell_type": "markdown",
+      "source": [
+        "\n",
+        "\n",
+        "### 1. Summary\n",
+        "\n",
+        "### **Project Phase 2: Data Pipeline & Validation Strategy**\n",
+        "\n",
+        "**Situation:** With the data explored and preprocessing logic verified, the project required a scalable way to feed 60 high-resolution satellite images into a neural network without crashing system memory.\n",
+        "\n",
+        "**Task:** The goal was to build a robust data pipeline that handles automated resizing, normalization, and class mapping, while also establishing a \"Validation Set\" to monitor the model's learning progress.\n",
+        "\n",
+        "**Action:**\n",
+        "\n",
+        "1. **Data Splitting:** Used `train_test_split` to divide the 60 images into a **Training Set (80%)** for learning and a **Validation Set (20%)** for \"practice quizzes\" during training.\n",
+        "2. **Standardization:** Implemented a normalization step to scale pixel values from [0-255] to **[0.0-1.0]**, making the data mathematically compatible with Deep Learning optimizers.\n",
+        "3. **TensorFlow Pipeline:** Created a `tf.data.Dataset` \"conveyor belt\" that utilizes `prefetching` and `batching`. This ensures the GPU stays busy by preparing the next batch of images in the background while the model is learning from the current one.\n",
+        "4. **Error Handling:** Incorporated a `tf_parse` bridge to safely run Python-based OpenCV functions within TensorFlow's high-speed execution environment.\n",
+        "\n",
+        "**Result:**\n",
+        "\n",
+        "* Established two high-performance data streams: `train_dataset` and `val_dataset`.\n",
+        "* Successfully verified batch shapes of **(8, 256, 256, 3)** for images and **(8, 256, 256, 1)** for masks.\n",
+        "* The project is now architecture-ready, with data flowing efficiently from storage to the GPU-accelerated training environment.\n",
+        "\n",
+        "---\n",
+        "\n"
+      ],
+      "metadata": {
+        "id": "5AOyltgNMErQ"
+      }
+    },
+    {
+      "cell_type": "code",
+      "source": [],
+      "metadata": {
+        "id": "EzFZjZhDMhOr"
+      },
+      "execution_count": null,
+      "outputs": []
+    }
+  ]
+}
